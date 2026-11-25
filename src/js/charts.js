@@ -304,13 +304,19 @@ export function renderCapitalFlowSankey({ flow, container, readoutEl, tableBodyE
     const mx = (x0 + x1) / 2;
     const isTempo = link.source.includes('tempo') || link.target.includes('tempo');
     const isMulti = link.target === 'w:multi';
-    const fill = isTempo ? PALETTE.magenta : isMulti ? PALETTE.cream : PALETTE.salmon;
+    const gradId = isTempo
+      ? isMulti
+        ? 'url(#silkTempoMulti)'
+        : 'url(#silkTempo)'
+      : isMulti
+        ? 'url(#silkBaseMulti)'
+        : 'url(#silkBase)';
 
     const d = `M${x0.toFixed(1)},${sy0.toFixed(1)} C${mx.toFixed(1)},${sy0.toFixed(1)} ${mx.toFixed(1)},${ty0.toFixed(1)} ${x1.toFixed(1)},${ty0.toFixed(1)} L${x1.toFixed(1)},${ty1.toFixed(1)} C${mx.toFixed(1)},${ty1.toFixed(1)} ${mx.toFixed(1)},${sy1.toFixed(1)} ${x0.toFixed(1)},${sy1.toFixed(1)} Z`;
 
     ribbons.push({
       d,
-      fill,
+      fill: gradId,
       source: link.source,
       target: link.target,
       sourceLabel: s.label,
@@ -370,6 +376,26 @@ export function renderCapitalFlowSankey({ flow, container, readoutEl, tableBodyE
   container.innerHTML = `
     <svg role="img" viewBox="0 0 ${W} ${H}" aria-label="Alluvial capital flow from task posters through chains and modes to winners">
       <title>Capital Flow River (${escapeHtml(flow.scope)})</title>
+      <defs>
+        <linearGradient id="silkTempo" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="${PALETTE.cream}" stop-opacity="0.78" />
+          <stop offset="48%" stop-color="${PALETTE.magenta}" stop-opacity="0.95" />
+          <stop offset="100%" stop-color="${PALETTE.salmon}" stop-opacity="0.88" />
+        </linearGradient>
+        <linearGradient id="silkTempoMulti" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="${PALETTE.magenta}" stop-opacity="0.9" />
+          <stop offset="100%" stop-color="${PALETTE.paper}" stop-opacity="0.95" />
+        </linearGradient>
+        <linearGradient id="silkBase" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="${PALETTE.cream}" stop-opacity="0.72" />
+          <stop offset="50%" stop-color="${PALETTE.salmon}" stop-opacity="0.92" />
+          <stop offset="100%" stop-color="${PALETTE.salmon}" stop-opacity="0.78" />
+        </linearGradient>
+        <linearGradient id="silkBaseMulti" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="${PALETTE.salmon}" stop-opacity="0.88" />
+          <stop offset="100%" stop-color="${PALETTE.paper}" stop-opacity="0.95" />
+        </linearGradient>
+      </defs>
       ${colTitles.map((t) => `<text x="${t.x}" y="18" text-anchor="middle" fill="${PALETTE.muted}" font-family="Departure Mono, monospace" font-size="11">${t.text}</text>`).join('')}
       <g class="flow-ribbons">${svgRibbons}</g>
       <g class="flow-nodes">${svgNodes}</g>
@@ -484,45 +510,73 @@ export function renderSwarmConvergence({ task, radarContainer, curveContainer, r
     { min: Math.round(maxMin), label: fmtHours(maxMin / 60) },
   ].filter((rm, i, arr) => rm.min <= maxMin * 1.05 && (i === 0 || rm.min > arr[i - 1].min * 1.4));
 
-  // Golden angle distribution keeps dense simultaneous bursts legible without overlap
+  // Golden angle distribution + gentle silk-curve convergence filaments (inspired by Brand Kit convergence plate)
   const goldenAngle = 2.399963229728653;
   const points = arrivals.map((a, idx) => {
     const r = logMap(a.dtMin);
     const angle = -Math.PI / 2 + idx * goldenAngle;
     const x = cx + Math.cos(angle) * r;
     const y = cy + Math.sin(angle) * r;
-    const dotR = a.completedHistory >= 20 ? 5.6 : a.completedHistory >= 5 ? 4.4 : 3.4;
-    return { ...a, idx, x, y, dotR };
+    // Quadratic Bezier control point offset tangentially for organic silk filament curvature
+    const midR = r * 0.54;
+    const bend = (idx % 2 === 0 ? 1 : -1) * Math.min(28, r * 0.17);
+    const ctrlX = cx + Math.cos(angle) * midR - Math.sin(angle) * bend;
+    const ctrlY = cy + Math.sin(angle) * midR + Math.cos(angle) * bend;
+    const tileSz = a.completedHistory >= 20 ? 10.4 : a.completedHistory >= 5 ? 8.2 : 6.4;
+    return { ...a, idx, x, y, ctrlX, ctrlY, tileSz };
   });
+
+  // Observatory outer degree hairlines (every 15 degrees)
+  const compassTicks = Array.from({ length: 24 }, (_, i) => {
+    const a = (i * Math.PI) / 12;
+    const r0 = maxR + 5;
+    const r1 = i % 6 === 0 ? maxR + 14 : maxR + 9;
+    return `<line x1="${(cx + Math.cos(a) * r0).toFixed(1)}" y1="${(cy + Math.sin(a) * r0).toFixed(1)}" x2="${(cx + Math.cos(a) * r1).toFixed(1)}" y2="${(cy + Math.sin(a) * r1).toFixed(1)}" stroke="${PALETTE.line}" stroke-opacity="${i % 6 === 0 ? '0.8' : '0.35'}" stroke-width="${i % 6 === 0 ? '1.2' : '0.8'}" />`;
+  }).join('');
 
   radarContainer.innerHTML = `
     <svg role="img" viewBox="0 0 ${W} ${H}" aria-label="Radial swarm convergence map showing agent arrivals over log time">
-      <title>Swarm convergence on ${escapeHtml(task.referenceCode)}</title>
+      <title>Swarm convergence filaments on ${escapeHtml(task.referenceCode)}</title>
+      <defs>
+        <radialGradient id="swarmCoreHalo" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="${PALETTE.paper}" stop-opacity="0.85" />
+          <stop offset="28%" stop-color="${PALETTE.magenta}" stop-opacity="0.46" />
+          <stop offset="68%" stop-color="${PALETTE.maroon}" stop-opacity="0.24" />
+          <stop offset="100%" stop-color="${PALETTE.ground}" stop-opacity="0" />
+        </radialGradient>
+        <linearGradient id="ceramicCoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="${PALETTE.paper}" />
+          <stop offset="100%" stop-color="${PALETTE.salmon}" />
+        </linearGradient>
+      </defs>
+      <circle cx="${cx}" cy="${cy}" r="118" fill="url(#swarmCoreHalo)" opacity="0.58" />
+      ${compassTicks}
       ${ringMarks
         .map((rm) => {
           const r = logMap(rm.min);
           return `
-            <circle cx="${cx}" cy="${cy}" r="${r.toFixed(1)}" fill="none" stroke="${PALETTE.line}" stroke-opacity="0.65" stroke-dasharray="3 4" />
-            <text x="${cx + 5}" y="${(cy - r + 12).toFixed(1)}" fill="${PALETTE.muted}" font-family="Departure Mono, monospace" font-size="10">${escapeHtml(rm.label)}</text>`;
+            <circle cx="${cx}" cy="${cy}" r="${r.toFixed(1)}" fill="none" stroke="${PALETTE.line}" stroke-opacity="0.58" stroke-dasharray="2 5" />
+            <text x="${cx + 6}" y="${(cy - r + 12).toFixed(1)}" fill="${PALETTE.muted}" font-family="Departure Mono, monospace" font-size="9.5">${escapeHtml(rm.label)}</text>`;
         })
         .join('')}
       <g class="swarm-spokes">
         ${points
           .map(
             (p) =>
-              `<line class="swarm-spoke" data-idx="${p.idx}" x1="${cx}" y1="${cy}" x2="${p.x.toFixed(1)}" y2="${p.y.toFixed(1)}" stroke="${p.tapVerified ? PALETTE.magenta : PALETTE.line}" stroke-opacity="${p.tapVerified ? '0.26' : '0.22'}" stroke-width="1" />`
+              `<path class="swarm-spoke" data-idx="${p.idx}" d="M${cx},${cy} Q${p.ctrlX.toFixed(1)},${p.ctrlY.toFixed(1)} ${p.x.toFixed(1)},${p.y.toFixed(1)}" fill="none" stroke="${p.tapVerified ? PALETTE.magenta : PALETTE.salmon}" stroke-opacity="${p.tapVerified ? '0.36' : '0.24'}" stroke-width="${p.tapVerified ? '1.3' : '1'}" />`
           )
           .join('')}
       </g>
-      <circle cx="${cx}" cy="${cy}" r="16" fill="${PALETTE.magenta}" fill-opacity="0.24" />
-      <circle cx="${cx}" cy="${cy}" r="9" fill="${PALETTE.magenta}" />
-      <circle cx="${cx}" cy="${cy}" r="3.5" fill="${PALETTE.paper}" />
+      <!-- Central luminous ceramic escrow tile (echoes Brand Kit plate-converge-landscape) -->
+      <rect class="swarm-core-halo" x="${cx - 22}" y="${cy - 22}" width="44" height="44" rx="11" fill="${PALETTE.magenta}" opacity="0.24" />
+      <rect x="${cx - 11}" y="${cy - 11}" width="22" height="22" rx="5.5" fill="url(#ceramicCoreGrad)" stroke="${PALETTE.magenta}" stroke-width="1.5" />
+      <rect x="${cx - 4}" y="${cy - 4}" width="8" height="8" rx="2" fill="${PALETTE.magenta}" />
       <text x="${cx}" y="${H - 12}" text-anchor="middle" fill="${PALETTE.muted}" font-family="Departure Mono, monospace" font-size="10.5">${escapeHtml(task.referenceCode)} · ${fmtUsd(task.rewardUsd)} ${escapeHtml(task.symbol)} · ${fmtInt(arrivals.length)} arrivals</text>
       <g class="swarm-dots">
         ${points
           .map(
             (p) =>
-              `<circle class="swarm-dot" data-idx="${p.idx}" tabindex="0" role="button" aria-label="${escapeHtml(`Arrival #${p.idx + 1}: ${p.workerShort} at +${fmtSec(p.dtSec)}, ${p.completedHistory} prior completed tasks`)}" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.dotR}" fill="${p.tapVerified ? PALETTE.paper : PALETTE.salmon}" stroke="${p.tapVerified ? PALETTE.magenta : PALETTE.ground}" stroke-width="${p.tapVerified ? '1.6' : '1'}" />`
+              `<rect class="swarm-dot" data-idx="${p.idx}" tabindex="0" role="button" aria-label="${escapeHtml(`Arrival #${p.idx + 1}: ${p.workerShort} at +${fmtSec(p.dtSec)}, ${p.completedHistory} prior completed tasks`)}" x="${(p.x - p.tileSz / 2).toFixed(1)}" y="${(p.y - p.tileSz / 2).toFixed(1)}" width="${p.tileSz.toFixed(1)}" height="${p.tileSz.toFixed(1)}" rx="2.4" fill="${p.tapVerified ? PALETTE.paper : PALETTE.salmon}" stroke="${p.tapVerified ? PALETTE.magenta : PALETTE.ground}" stroke-width="${p.tapVerified ? '1.5' : '1'}" />`
           )
           .join('')}
       </g>
@@ -597,6 +651,7 @@ export function renderSwarmConvergence({ task, radarContainer, curveContainer, r
   inspectPoint(0);
 
   // WCAG 2.2.2 Pause/Play arrival replay control (starts static by default)
+  const coreHalo = radarContainer.querySelector('.swarm-core-halo');
   if (replayBtn) {
     const liveBtn = replayBtn.cloneNode(true);
     replayBtn.replaceWith(liveBtn);
@@ -610,6 +665,7 @@ export function renderSwarmConvergence({ task, radarContainer, curveContainer, r
       }
       dots.forEach((d) => d.setAttribute('opacity', '1'));
       spokes.forEach((s) => s.setAttribute('opacity', '1'));
+      coreHalo?.classList.remove('is-pulsing');
       liveBtn.textContent = 'Play arrival replay';
       liveBtn.setAttribute('aria-pressed', 'false');
     };
@@ -622,6 +678,7 @@ export function renderSwarmConvergence({ task, radarContainer, curveContainer, r
       let shown = 0;
       dots.forEach((d) => d.setAttribute('opacity', '0.06'));
       spokes.forEach((s) => s.setAttribute('opacity', '0.04'));
+      coreHalo?.classList.add('is-pulsing');
       liveBtn.textContent = 'Pause replay';
       liveBtn.setAttribute('aria-pressed', 'true');
       const stepMs = Math.max(55, Math.min(180, Math.round(4500 / Math.max(1, arrivals.length))));

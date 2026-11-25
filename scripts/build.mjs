@@ -67,6 +67,144 @@ const NAV_ITEMS = [
   { slug: 'methods', href: 'methods/', label: 'Methods' },
 ];
 
+function renderHeroMosaicHtml(snap) {
+  const t = snap.headline.tempo;
+  const b = snap.headline.base;
+  const total = Math.max(1, t.totalTasks + b.totalTasks);
+  const buckets = [
+    {
+      cls: 'is-tempo-done',
+      count: t.completedTasks,
+      label: `Tempo settled: ${fmtInt(t.completedTasks)} tasks (${((t.completedTasks / total) * 100).toFixed(1)}% · ${fmtUsd(t.rewardCompletedUsd)} OUSD)`,
+    },
+    {
+      cls: 'is-base-done',
+      count: b.completedTasks,
+      label: `Base settled: ${fmtInt(b.completedTasks)} tasks (${((b.completedTasks / total) * 100).toFixed(1)}% · ${fmtUsd(b.rewardCompletedUsd)} USDC)`,
+    },
+    {
+      cls: 'is-live-open',
+      count: t.liveOpenTasks + b.liveOpenTasks,
+      label: `Live open now: ${fmtInt(t.liveOpenTasks + b.liveOpenTasks)} tasks (${fmtInt(t.liveOpenTasks)} Tempo · ${fmtInt(b.liveOpenTasks)} Base)`,
+    },
+    {
+      cls: 'is-ghost',
+      count: t.ghostOpenTasks + b.ghostOpenTasks + t.inProgressTasks + b.inProgressTasks,
+      label: `Ghost-open / in-progress: ${fmtInt(t.ghostOpenTasks + b.ghostOpenTasks + t.inProgressTasks + b.inProgressTasks)} tasks`,
+    },
+    {
+      cls: 'is-dead',
+      count: t.expiredTasks + t.cancelledTasks + b.expiredTasks + b.cancelledTasks,
+      label: `Expired + cancelled: ${fmtInt(t.expiredTasks + t.cancelledTasks + b.expiredTasks + b.cancelledTasks)} tasks`,
+    },
+  ];
+
+  // Allocate exactly 50 tiles proportionally (1 tile = 2% of all public tasks)
+  const raw = buckets.map((bk) => (bk.count / total) * 50);
+  const alloc = raw.map((v, i) => (buckets[i].count > 0 ? Math.max(1, Math.floor(v)) : 0));
+  let sum = alloc.reduce((a, c) => a + c, 0);
+  while (sum < 50) {
+    let best = 0;
+    let bestRem = -1;
+    for (let i = 0; i < raw.length; i += 1) {
+      const rem = raw[i] - alloc[i];
+      if (rem > bestRem) {
+        bestRem = rem;
+        best = i;
+      }
+    }
+    alloc[best] += 1;
+    sum += 1;
+  }
+  while (sum > 50) {
+    let worst = 0;
+    for (let i = 1; i < alloc.length; i += 1) {
+      if (alloc[i] > alloc[worst]) worst = i;
+    }
+    alloc[worst] -= 1;
+    sum -= 1;
+  }
+
+  const tiles = [];
+  buckets.forEach((bk, bi) => {
+    for (let k = 0; k < alloc[bi]; k += 1) {
+      tiles.push(
+        `<button type="button" class="mosaic-tile ${bk.cls}" data-detail="${esc(bk.label)}" aria-label="${esc(bk.label)}"></button>`
+      );
+    }
+  });
+
+  return `
+    <div class="mosaic-specimen" aria-label="50-tile live market ledger mosaic">
+      <div class="mosaic-head">
+        <span>LEDGER MOSAIC · 1 TILE = 2%</span>
+        <strong>${fmtInt(total)} PUBLIC TASKS</strong>
+      </div>
+      <div class="mosaic-grid">${tiles.join('')}</div>
+      <div id="hero-mosaic-readout" class="mosaic-readout" aria-live="polite">${esc(buckets[0].label)}</div>
+    </div>`;
+}
+
+function renderSsrTimeSeriesPair(rows) {
+  if (!rows || !rows.length) {
+    return { readout: 'No time series rows available.', agentsSvg: '', volumeSvg: '' };
+  }
+  const W = 880;
+  const H = 260;
+  const pad = { top: 20, right: 56, bottom: 34, left: 56 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+  const maxAgents = Math.max(1, ...rows.map((r) => r.activeAgents));
+  const maxTasks = Math.max(1, ...rows.map((r) => r.tasksCreated));
+  const maxUsd = Math.max(1, ...rows.map((r) => Math.max(r.rewardUsd, r.paidUsd)));
+  const stepX = rows.length > 1 ? plotW / (rows.length - 1) : plotW;
+  const barW = Math.max(3, Math.min(20, (plotW / Math.max(1, rows.length)) * 0.54));
+  const xAt = (i) => (rows.length === 1 ? pad.left + plotW / 2 : pad.left + i * stepX);
+  const yAgents = (v) => pad.top + plotH - (v / maxAgents) * plotH;
+  const stride = Math.max(1, Math.ceil(rows.length / 7));
+
+  const gridLines = (maxVal, fmtFn) =>
+    [0, 0.25, 0.5, 0.75, 1]
+      .map((f) => {
+        const y = pad.top + plotH * (1 - f);
+        return `<line x1="${pad.left}" y1="${y.toFixed(1)}" x2="${W - pad.right}" y2="${y.toFixed(1)}" stroke="#312B25" stroke-dasharray="${f === 0 ? 'none' : '3 4'}" /><text x="${pad.left - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" fill="#B0A79D" font-family="Departure Mono, monospace" font-size="10.5">${esc(fmtFn(maxVal * f))}</text>`;
+      })
+      .join('');
+
+  const xTicks = rows
+    .map((r, i) => {
+      if (i !== 0 && i !== rows.length - 1 && i % stride !== 0) return '';
+      return `<text x="${xAt(i).toFixed(1)}" y="${H - 10}" text-anchor="middle" fill="#B0A79D" font-family="Departure Mono, monospace" font-size="10.5">${esc(r.bucket.slice(5))}</text>`;
+    })
+    .join('');
+
+  const agentPath = rows.map((r, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAgents(r.activeAgents).toFixed(1)}`).join(' ');
+  const agentArea = `${agentPath} L${xAt(rows.length - 1).toFixed(1)},${(pad.top + plotH).toFixed(1)} L${xAt(0).toFixed(1)},${(pad.top + plotH).toFixed(1)} Z`;
+  const taskBars = rows
+    .map((r, i) => {
+      const h = (r.tasksCreated / maxTasks) * plotH;
+      return `<rect x="${(xAt(i) - barW / 2).toFixed(1)}" y="${(pad.top + plotH - h).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="2" fill="#D9A097" fill-opacity="0.34" />`;
+    })
+    .join('');
+
+  const halfBar = Math.max(2, Math.min(11, (plotW / Math.max(1, rows.length)) * 0.34));
+  const usdBars = rows
+    .map((r, i) => {
+      const cx = xAt(i);
+      const hPost = (r.rewardUsd / maxUsd) * plotH;
+      const hPaid = (r.paidUsd / maxUsd) * plotH;
+      return `<rect x="${(cx - halfBar - 0.5).toFixed(1)}" y="${(pad.top + plotH - hPost).toFixed(1)}" width="${halfBar.toFixed(1)}" height="${Math.max(0, hPost).toFixed(1)}" rx="1.5" fill="#D9A097" fill-opacity="0.72" /><rect x="${(cx + 0.5).toFixed(1)}" y="${(pad.top + plotH - hPaid).toFixed(1)}" width="${halfBar.toFixed(1)}" height="${Math.max(0, hPaid).toFixed(1)}" rx="1.5" fill="#E74079" />`;
+    })
+    .join('');
+
+  const sel = rows[rows.length > 2 ? rows.length - 2 : rows.length - 1];
+  const readout = `<span><strong>${esc(sel.bucket)}</strong> (day)</span><span>Active agents: <strong>${fmtInt(sel.activeAgents)}</strong></span><span>Tasks posted: <strong>${fmtInt(sel.tasksCreated)}</strong></span><span>Posted: <strong>${fmtUsd(sel.rewardUsd)}</strong></span><span>Paid: <strong style="color:var(--magenta)">${fmtUsd(sel.paidUsd)}</strong> (${fmtInt(sel.settlements)} payouts)</span>`;
+
+  const agentsSvg = `<svg role="img" viewBox="0 0 ${W} ${H}" aria-label="Active agents and tasks posted over time"><defs><linearGradient id="ssrAgGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#E74079" stop-opacity="0.34" /><stop offset="100%" stop-color="#E74079" stop-opacity="0.01" /></linearGradient></defs>${gridLines(maxAgents, (v) => fmtInt(v))}${taskBars}<path d="${agentArea}" fill="url(#ssrAgGrad)" /><path d="${agentPath}" fill="none" stroke="#E74079" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />${xTicks}</svg>`;
+  const volumeSvg = `<svg role="img" viewBox="0 0 ${W} ${H}" aria-label="Rewards put up versus rewards paid over time">${gridLines(maxUsd, (v) => `$${Math.round(v)}`)}${usdBars}${xTicks}</svg>`;
+  return { readout, agentsSvg, volumeSvg };
+}
+
 function renderShell({
   slug,
   title,
@@ -74,6 +212,8 @@ function renderShell({
   eyebrow,
   h1Html,
   lead,
+  heroAsideHtml = '',
+  hasPlate = false,
   bodyHtml,
   asOf,
   baseRel,
@@ -152,15 +292,18 @@ function renderShell({
   </header>
 
   <main class="page-shell">
-    <section class="hero">
+    <section class="hero${hasPlate ? ' has-plate' : ''}">
       <div class="hero-copy">
         <div class="eyebrow">${esc(eyebrow)}</div>
         <h1 id="main-heading" tabindex="-1">${h1Html}</h1>
         <p class="hero-lead">${esc(lead)}</p>
       </div>
-      <div class="share-bar">
-        <button type="button" class="btn btn-primary" id="copy-view-link">Copy view link</button>
-        <a class="btn btn-mono" href="${baseRel}/og/${esc(ogSlug)}.png" download="taskmarket-${esc(ogSlug)}-card.png">Download card PNG</a>
+      <div class="hero-aside">
+        ${heroAsideHtml}
+        <div class="share-bar">
+          <button type="button" class="btn btn-primary" id="copy-view-link">Copy view link</button>
+          <a class="btn btn-mono" href="${baseRel}/og/${esc(ogSlug)}.png" download="taskmarket-${esc(ogSlug)}-card.png">Download card PNG</a>
+        </div>
       </div>
     </section>
 
@@ -200,6 +343,7 @@ function buildOverviewBody(snap, baseRel) {
   const swarm = snap.swarmConvergence.summary;
   const latestWk = snap.weeklyPostersAndChains[snap.weeklyPostersAndChains.length - 1] || {};
   const paidDelta = growth.metrics.find((m) => m.key === 'paidUsd')?.deltaPct ?? 0;
+  const ssrTs = renderSsrTimeSeriesPair(snap.timeSeries?.day?.['30d'] || []);
 
   return `
     <div class="kpi-grid">
@@ -255,18 +399,18 @@ function buildOverviewBody(snap, baseRel) {
         Rewards paid rose <strong>${paidDelta >= 0 ? '+' : ''}${paidDelta}%</strong> vs the prior 7 complete days, while Tempo now accounts for <strong>${Math.round(((latestWk.tempoTasks || 0) / Math.max(1, latestWk.totalTasks || 1)) * 100)}%</strong> of current-week public task volume.
       </div>
 
-      <div id="ts-readout" class="chart-readout" aria-live="polite">Loading time series...</div>
+      <div id="ts-readout" class="chart-readout" aria-live="polite">${ssrTs.readout}</div>
 
       <div class="two-col">
         <figure class="chart-figure">
-          <div id="ts-agents-chart" class="chart-stage"></div>
+          <div id="ts-agents-chart" class="chart-stage">${ssrTs.agentsSvg}</div>
           <figcaption class="chart-legend">
             <span class="legend-item"><span class="legend-swatch" style="background:var(--magenta)"></span>Active agents (line)</span>
             <span class="legend-item"><span class="legend-swatch" style="background:rgba(217,160,151,0.5)"></span>Tasks posted (bars, right axis)</span>
           </figcaption>
         </figure>
         <figure class="chart-figure">
-          <div id="ts-volume-chart" class="chart-stage"></div>
+          <div id="ts-volume-chart" class="chart-stage">${ssrTs.volumeSvg}</div>
           <figcaption class="chart-legend">
             <span class="legend-item"><span class="legend-swatch" style="background:var(--salmon)"></span>Rewards put up (USD)</span>
             <span class="legend-item"><span class="legend-swatch" style="background:var(--magenta)"></span>Rewards paid out (USD)</span>
@@ -412,6 +556,7 @@ function buildFlowBody(snap) {
         </div>
       </div>
 
+      <div id="flow-dollar-strip" class="dollar-strip"></div>
       <div id="flow-insight-text" class="insight-callout"></div>
       <div id="flow-readout" class="chart-readout" aria-live="polite"></div>
       <div id="flow-sankey-chart" class="chart-stage"></div>
@@ -647,7 +792,7 @@ function buildInsightsBody(snap) {
       </div>
 
       <div class="insight-callout">
-        <strong>A 10x mortality gap between chains:</strong>
+        <strong>Sharp mortality gap between chains (${mT.formalDeathRatePct}% vs ${mB.formalDeathRatePct}%):</strong>
         Only <strong>${mT.formalDeathRatePct}%</strong> of Tempo tasks ended expired or cancelled (<strong>${mT.completionRatePct}%</strong> completed), compared with <strong>${mB.formalDeathRatePct}%</strong> formal deaths on Base (<strong>${fmtUsd(mB.rewardExpiredUsd + mB.rewardCancelledUsd)}</strong> unpaid/reclaimed). Across both chains, another <strong>${fmtInt(mT.ghostOpenTasks + mB.ghostOpenTasks)}</strong> tasks sit in ghost-open limbo past their submission deadline.
       </div>
 
@@ -1000,9 +1145,11 @@ export async function buildSite({ snapshot = null, siteUrl = DEFAULT_SITE_URL } 
       outPath: path.join(DIST_DIR, 'index.html'),
       baseRel: '.',
       ogSlug: 'overview',
+      hasPlate: true,
+      heroAsideHtml: renderHeroMosaicHtml(snap),
       title: 'Live Market Overview',
       description: `Live Taskmarket pulse as of ${asOf}: ${fmtInt(snap.headline.platform.activeAgents7d)} active agents (7d), ${fmtInt(snap.headline.platform.openTasks)} live open tasks, ${fmtInt(snap.headline.platform.completedTasksBreakdown)} completed tasks across Tempo and Base.`,
-      eyebrow: 'Live Market Pulse · Tempo (4217) & Base (8453)',
+      eyebrow: 'Plate 01 / 07 · Live Market Pulse · Tempo (4217) & Base (8453)',
       h1Html: 'The live <em>pulse</em> of Taskmarket.',
       lead: 'A public, server-fetched picture of active agents, posted escrow, settled payouts, and dual-chain activity across Tempo OUSD and Base USDC.',
       bodyHtml: buildOverviewBody(snap, '.'),
@@ -1014,7 +1161,7 @@ export async function buildSite({ snapshot = null, siteUrl = DEFAULT_SITE_URL } 
       ogSlug: 'flow',
       title: 'Capital Flow River',
       description: `Trace ${fmtUsd(snap.capitalFlow.all.totalUsd)} in completed Taskmarket escrow from requester wallets through chain and mode conduits to winning agents.`,
-      eyebrow: 'Escrow Settlement Topology',
+      eyebrow: 'Plate 02 / 07 · Escrow Settlement Topology',
       h1Html: 'Where escrow <em>flows</em> on-chain.',
       lead: 'Completed public task rewards traced from top requester wallets through Tempo and Base mode conduits to single winners and multi-winner split pools.',
       bodyHtml: buildFlowBody(snap),
@@ -1024,9 +1171,10 @@ export async function buildSite({ snapshot = null, siteUrl = DEFAULT_SITE_URL } 
       outPath: path.join(DIST_DIR, 'swarm', 'index.html'),
       baseRel: '..',
       ogSlug: 'swarm',
+      hasPlate: true,
       title: 'Swarm Convergence Radar',
       description: `Live agent convergence velocity on Taskmarket: fastest first submission in +${fmtSec(snap.swarmConvergence.summary.fastestArrivalSec)}, median first arrival in +${fmtSec(snap.swarmConvergence.summary.medianFirstArrivalSec)}.`,
-      eyebrow: 'Real-Time Submission Arrival Velocity',
+      eyebrow: 'Plate 03 / 07 · Real-Time Convergence Filaments',
       h1Html: 'How the <em>swarm</em> converges.',
       lead: 'Exact submission arrival timestamps plotted radially from task creation so you can see how quickly autonomous agents detect and compete on new tasks.',
       bodyHtml: buildSwarmBody(snap),
@@ -1038,7 +1186,7 @@ export async function buildSite({ snapshot = null, siteUrl = DEFAULT_SITE_URL } 
       ogSlug: 'insights',
       title: 'Market Diagnostics',
       description: `Non-obvious Taskmarket diagnostics: Tempo median decision ${fmtHours(snap.diagnostics.timeToDecision.tempo.medianHours)} vs Base ${fmtHours(snap.diagnostics.timeToDecision.base.medianHours)}, posting concentration, task mortality, and 7-day momentum.`,
-      eyebrow: 'Concentration · Latency · Mortality · Growth',
+      eyebrow: 'Plate 04 / 07 · Concentration · Latency · Mortality · Growth',
       h1Html: 'What the <em>market</em> reveals.',
       lead: 'Four structural diagnostics computed directly from public Taskmarket data: requester concentration, time to settlement, tasks that died, and 7-day momentum.',
       bodyHtml: buildInsightsBody(snap),
@@ -1050,7 +1198,7 @@ export async function buildSite({ snapshot = null, siteUrl = DEFAULT_SITE_URL } 
       ogSlug: 'activity',
       title: 'Activity Heatmaps & Live Feed',
       description: 'UTC hour-of-week activity cadence, mode-by-date heatmap, and filterable live event stream across Tempo and Base.',
-      eyebrow: 'Cadence & Stream',
+      eyebrow: 'Plate 05 / 07 · UTC Cadence & Live Stream',
       h1Html: 'When agents <em>work</em> most.',
       lead: 'Hour-of-week UTC density, task mode intensity across time, and a live filterable stream of newly posted tasks and submissions.',
       bodyHtml: buildActivityBody(snap),
@@ -1062,7 +1210,7 @@ export async function buildSite({ snapshot = null, siteUrl = DEFAULT_SITE_URL } 
       ogSlug: 'chains',
       title: 'Tempo vs Base & Weekly Posters',
       description: 'Side-by-side Tempo (OUSD) and Base (USDC) market metrics plus distinct task posters per week computed from the full public task list.',
-      eyebrow: 'Dual-Chain Comparison · 4217 & 8453',
+      eyebrow: 'Plate 06 / 07 · Dual-Chain Comparison · 4217 & 8453',
       h1Html: 'Tempo OUSD and <em>Base</em> USDC.',
       lead: 'Comparing settlement velocity, completion rates, mode mix, and weekly distinct task posters across both supported Taskmarket chains.',
       bodyHtml: buildChainsBody(snap),
@@ -1074,7 +1222,7 @@ export async function buildSite({ snapshot = null, siteUrl = DEFAULT_SITE_URL } 
       ogSlug: 'methods',
       title: 'Methods & API Verification',
       description: `Endpoints, formulas, refresh schedule, and verbatim spot-check values as of ${asOf}. MIT open-source with one-command deploy.`,
-      eyebrow: 'Reproducibility & Handover',
+      eyebrow: 'Plate 07 / 07 · Reproducibility & Handover',
       h1Html: 'Every number <em>verifiable</em>.',
       lead: 'Exact public Taskmarket API endpoints, server-side caching cadence, derived metric formulas, and spot-check values as of the latest snapshot.',
       bodyHtml: buildMethodsBody(snap, '..'),

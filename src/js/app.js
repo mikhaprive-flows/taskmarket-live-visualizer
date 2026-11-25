@@ -34,7 +34,27 @@ import {
   renderWeeklyPostersChart,
 } from './charts.js';
 
+function hydrateHeroMosaic() {
+  const readout = document.getElementById('hero-mosaic-readout');
+  const tiles = document.querySelectorAll('.mosaic-tile');
+  if (!readout || !tiles.length) return;
+  const defaultMsg = readout.textContent;
+  for (const tile of tiles) {
+    const msg = tile.dataset.detail || defaultMsg;
+    tile.addEventListener('pointerenter', () => {
+      readout.textContent = msg;
+    });
+    tile.addEventListener('focus', () => {
+      readout.textContent = msg;
+    });
+    tile.addEventListener('click', () => {
+      readout.textContent = msg;
+    });
+  }
+}
+
 function hydrateOverview(snap) {
+  hydrateHeroMosaic();
   let range = getParam('range', '30d');
   if (!['7d', '30d', '90d', 'all'].includes(range)) range = '30d';
   let bucket = getParam('bucket', 'day');
@@ -124,13 +144,40 @@ function hydrateFlow(snap) {
   const readoutEl = document.getElementById('flow-readout');
   const tbodyEl = document.getElementById('flow-table-body');
   const summaryEl = document.getElementById('flow-insight-text');
+  const dollarEl = document.getElementById('flow-dollar-strip');
 
   const draw = () => {
     const flow = snap.capitalFlow[chain] || snap.capitalFlow.all;
     renderCapitalFlowSankey({ flow, container: chartEl, readoutEl, tableBodyEl: tbodyEl });
+    const multiPct = flow.totalUsd > 0 ? (flow.multiWinnerUsd / flow.totalUsd) * 100 : 0;
+    const singlePct = Math.max(0, 100 - multiPct);
     if (summaryEl) {
-      const multiPct = flow.totalUsd > 0 ? (flow.multiWinnerUsd / flow.totalUsd) * 100 : 0;
       summaryEl.innerHTML = `In <strong>${escapeHtml(flow.scope)}</strong>, <strong>${fmtUsd(flow.totalUsd)}</strong> settled across <strong>${fmtInt(flow.completedTasks)}</strong> completed public tasks from <strong>${fmtInt(flow.uniquePosters)}</strong> distinct requester wallets. Single-award payouts reached <strong>${fmtInt(flow.uniqueSingleWinners)}</strong> unique winner wallets, while multi-winner split bounties accounted for <strong>${fmtUsd(flow.multiWinnerUsd)}</strong> (${fmtPct(multiPct, 1)}).`;
+    }
+    if (dollarEl) {
+      const tempoUsd = flow.nodes
+        .filter((n) => n.col === 1 && n.id.includes('tempo'))
+        .reduce((s, n) => s + n.usd, 0);
+      const baseUsd = flow.nodes
+        .filter((n) => n.col === 1 && n.id.includes('base'))
+        .reduce((s, n) => s + n.usd, 0);
+      const tempoCents = Math.round((tempoUsd / Math.max(1, flow.totalUsd)) * 100);
+      const baseCents = Math.max(0, 100 - tempoCents);
+      const multiCents = Math.round(multiPct);
+      const singleCents = Math.max(0, 100 - multiCents);
+      dollarEl.innerHTML = `
+        <div class="dollar-strip-head">
+          <span>ANATOMY OF EVERY <strong>$1.00</strong> SETTLED (${escapeHtml(flow.scope.toUpperCase())})</span>
+          <span>100% REPRODUCED FROM /API/TASKS</span>
+        </div>
+        <div class="dollar-bar" aria-hidden="true">
+          ${tempoCents > 0 ? `<div class="dollar-seg" style="inline-size:${tempoCents}%;background:var(--magenta)"></div>` : ''}
+          ${baseCents > 0 ? `<div class="dollar-seg" style="inline-size:${baseCents}%;background:var(--salmon)"></div>` : ''}
+        </div>
+        <div class="dollar-stats">
+          <span>Chain split: <strong style="color:var(--magenta)">${tempoCents}c Tempo OUSD</strong> · <strong style="color:var(--salmon)">${baseCents}c Base USDC</strong></span>
+          <span>Payout shape: <strong style="color:var(--cream)">${singleCents}c single-winner</strong> · <strong style="color:var(--paper)">${multiCents}c multi-winner pools</strong></span>
+        </div>`;
     }
   };
 

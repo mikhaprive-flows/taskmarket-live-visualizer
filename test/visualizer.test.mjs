@@ -69,7 +69,22 @@ test('all 7 views and 7 live 1200x630 OG PNG cards are built cleanly and obey ru
     { file: 'methods/index.html', og: 'methods.png' },
   ];
 
-  const bannedPhrases = ['revolutionary', 'game-changing', 'passive income', 'earn while you sleep', 'to the moon'];
+  const bannedPhrases = [
+    'revolutionary',
+    'game-changing',
+    'the future of work',
+    'insane',
+    '10x',
+    'passive income',
+    'earn while you sleep',
+    'get rich',
+    'guaranteed',
+    'price prediction',
+    'to the moon',
+    'airdrop',
+    'token launch',
+    'ai will replace',
+  ];
 
   for (const r of routes) {
     const html = await fs.readFile(path.join(DIST, r.file), 'utf8');
