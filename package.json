@@ -1,0 +1,23 @@
+{
+  "name": "taskmarket-live-visualizer",
+  "version": "1.0.0",
+  "description": "Public, read-only live market visualizer for Taskmarket on Tempo (4217) and Base (8453).",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "fetch": "node scripts/fetch-snapshot.mjs",
+    "og": "node scripts/generate-og.mjs",
+    "build": "node scripts/build.mjs",
+    "build:all": "node scripts/fetch-snapshot.mjs && node scripts/build.mjs",
+    "serve": "node server.mjs",
+    "start": "node server.mjs",
+    "deploy": "node scripts/fetch-snapshot.mjs && node scripts/build.mjs && node server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}
