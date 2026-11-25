@@ -656,7 +656,6 @@ export function renderSwarmConvergence({ task, radarContainer, curveContainer, r
     const liveBtn = replayBtn.cloneNode(true);
     replayBtn.replaceWith(liveBtn);
     liveBtn.textContent = 'Play arrival replay';
-    liveBtn.setAttribute('aria-pressed', 'false');
 
     const stopReplay = () => {
       if (activeSwarmReplayTimer) {
@@ -667,7 +666,6 @@ export function renderSwarmConvergence({ task, radarContainer, curveContainer, r
       spokes.forEach((s) => s.setAttribute('opacity', '1'));
       coreHalo?.classList.remove('is-pulsing');
       liveBtn.textContent = 'Play arrival replay';
-      liveBtn.setAttribute('aria-pressed', 'false');
     };
 
     liveBtn.addEventListener('click', () => {
@@ -680,7 +678,6 @@ export function renderSwarmConvergence({ task, radarContainer, curveContainer, r
       spokes.forEach((s) => s.setAttribute('opacity', '0.04'));
       coreHalo?.classList.add('is-pulsing');
       liveBtn.textContent = 'Pause replay';
-      liveBtn.setAttribute('aria-pressed', 'true');
       const stepMs = Math.max(55, Math.min(180, Math.round(4500 / Math.max(1, arrivals.length))));
       activeSwarmReplayTimer = setInterval(() => {
         if (shown >= arrivals.length) {
