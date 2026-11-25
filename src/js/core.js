@@ -248,3 +248,32 @@ export function initShareBar() {
     });
   }
 }
+
+const ROUTE_ORDER = ['overview', 'flow', 'swarm', 'insights', 'activity', 'chains', 'methods'];
+
+function routeSlugFromUrl(urlStr) {
+  try {
+    const pathname = new URL(urlStr).pathname.replace(/\/+$/, '');
+    const lastSeg = pathname.split('/').filter(Boolean).pop() || '';
+    return ROUTE_ORDER.includes(lastSeg) ? lastSeg : 'overview';
+  } catch {
+    return 'overview';
+  }
+}
+
+/**
+ * Progressive-enhancement directional Cross-Document View Transitions
+ * per modern-web-guidance (cross-document-transitions).
+ */
+export function initViewTransitions() {
+  if (typeof window === 'undefined') return;
+  window.addEventListener('pagereveal', (event) => {
+    if (!event.viewTransition) return;
+    const fromUrl = window.navigation?.activation?.from?.url;
+    if (!fromUrl) return;
+    const fromIdx = ROUTE_ORDER.indexOf(routeSlugFromUrl(fromUrl));
+    const toIdx = ROUTE_ORDER.indexOf(document.body?.dataset?.page || 'overview');
+    if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+    event.viewTransition.types?.add?.(toIdx > fromIdx ? 'forward' : 'backward');
+  });
+}

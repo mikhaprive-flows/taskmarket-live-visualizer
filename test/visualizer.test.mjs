@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from '../server.mjs';
 import { computeGini, computeHhi, isoWeekMonday, microsToUsd, shortAddr } from '../scripts/fetch-snapshot.mjs';
+import { buildWebMcpTools, filterActivityItems, initWebMcp } from '../src/js/webmcp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -110,10 +111,114 @@ test('all 7 views and 7 live 1200x630 OG PNG cards are built cleanly and obey ru
   }
 
   // Ensure zero browser-side calls to api.taskmarket.dev in client JS
-  for (const jsFile of ['core.js', 'charts.js', 'app.js']) {
+  for (const jsFile of ['core.js', 'charts.js', 'app.js', 'webmcp.js']) {
     const src = await fs.readFile(path.join(DIST, 'js', jsFile), 'utf8');
     assert.doesNotMatch(src, /https?:\/\/api\.taskmarket\.dev/i, `${jsFile} must never fetch api.taskmarket.dev directly`);
   }
+
+  // Verify Modern Web & WebMCP markup + CSS guards
+  const activityHtml = await fs.readFile(path.join(DIST, 'activity', 'index.html'), 'utf8');
+  assert.match(activityHtml, /toolname="filter-activity-feed"/, '/activity/ includes declarative WebMCP filter form');
+  assert.match(activityHtml, /toolautosubmit/, '/activity/ marks read-only filter form with toolautosubmit');
+
+  const methodsHtml = await fs.readFile(path.join(DIST, 'methods', 'index.html'), 'utf8');
+  assert.match(methodsHtml, /Agent-native access \(WebMCP\)/, '/methods/ documents WebMCP tools');
+  assert.match(methodsHtml, /get_market_headline/, '/methods/ lists WebMCP tool table');
+
+  const mainCss = await fs.readFile(path.join(DIST, 'styles', 'main.css'), 'utf8');
+  assert.match(mainCss, /@view-transition\s*\{\s*navigation:\s*auto;/, 'CSS enables Cross-Document View Transitions');
+  assert.match(mainCss, /content-visibility:\s*auto/, 'CSS defers off-screen below-the-fold sections');
+  assert.match(mainCss, /:tool-form-active/, 'CSS styles declarative WebMCP active form state');
+});
+
+test('WebMCP imperative tools validate input, return structured payloads, and clean up via AbortSignal', async () => {
+  const snap = JSON.parse(await fs.readFile(path.join(DIST, 'data', 'snapshot.json'), 'utf8'));
+  let lastNavigated = null;
+  const tools = buildWebMcpTools(snap, {
+    baseRel: '..',
+    navigate: (url) => {
+      lastNavigated = url;
+    },
+  });
+
+  assert.equal(tools.length, 7, 'registers 7 imperative WebMCP tools');
+  const byName = new Map(tools.map((t) => [t.name, t]));
+
+  // 1. Headline
+  const headline = byName.get('get_market_headline').execute({ chain: 'tempo' });
+  assert.ok(headline.asOfUtc.includes('UTC'));
+  assert.ok(headline.tempo && !headline.base);
+  assert.ok(byName.get('get_market_headline').execute({ chain: 'solana' }).error, 'invalid chain returns error object');
+
+  // 2. Time series
+  const ts = byName.get('get_time_series').execute({ range: '30d', bucket: 'day' });
+  assert.ok(ts.pointCount > 0 && Array.isArray(ts.rows));
+  assert.ok(byName.get('get_time_series').execute({ range: '5y' }).error);
+
+  // 3. Capital flow
+  const flow = byName.get('get_capital_flow').execute({ chain: 'all', topCorridors: 5 });
+  assert.ok(flow.totalUsd > 0 && flow.topCorridors.length <= 5);
+  assert.ok(byName.get('get_capital_flow').execute({ topCorridors: 999 }).error);
+
+  // 4. Swarm convergence
+  const swarmList = byName.get('get_swarm_convergence').execute({ limit: 3 });
+  assert.ok(swarmList.tasks.length > 0 && swarmList.tasks.length <= 3);
+  const firstCode = swarmList.tasks[0].referenceCode;
+  const swarmDetail = byName.get('get_swarm_convergence').execute({ referenceCode: firstCode });
+  assert.equal(swarmDetail.selectedTask.referenceCode, firstCode);
+  assert.ok(byName.get('get_swarm_convergence').execute({ referenceCode: 'TSK-DOES-NOT-EXIST' }).error);
+
+  // 5. Market diagnostics
+  const diag = byName.get('get_market_diagnostics').execute({ topic: 'mortality', chain: 'tempo' });
+  assert.ok(diag.mortality?.tempo);
+  assert.ok(byName.get('get_market_diagnostics').execute({ topic: 'unknown' }).error);
+
+  // 6. Weekly posters
+  const weekly = byName.get('get_weekly_posters').execute({ weeks: 4 });
+  assert.ok(weekly.weeks.length > 0 && weekly.weeks.length <= 4);
+
+  // 7. Navigation
+  const navRes = byName.get('navigate_visualizer_view').execute({ view: 'flow', chain: 'tempo' });
+  assert.equal(navRes.navigated, true);
+  assert.equal(lastNavigated, '../flow/?chain=tempo');
+  assert.ok(byName.get('navigate_visualizer_view').execute({ view: 'admin' }).error);
+
+  // 8. Activity filter helper (backing declarative WebMCP form)
+  const filtered = filterActivityItems(snap.activityFeed.recent, { chain: 'tempo', limit: 5 });
+  assert.ok(filtered.items.every((item) => item.chain.toLowerCase() === 'tempo'));
+
+  // 9. Registration & AbortSignal teardown against mock document.modelContext
+  const registeredSignals = [];
+  let pagehideHandler = null;
+  const mockDoc = {
+    modelContext: {
+      ontoolactivated: null,
+      ontoolcancel: null,
+      addEventListener() {},
+      async registerTool(tool, opts) {
+        registeredSignals.push({ name: tool.name, signal: opts?.signal });
+      },
+    },
+  };
+  const mockWin = {
+    addEventListener(type, fn) {
+      if (type === 'pagehide') pagehideHandler = fn;
+    },
+  };
+
+  const initRes = await initWebMcp(snap, { baseRel: '.', doc: mockDoc, win: mockWin });
+  assert.equal(initRes.supported, true);
+  assert.equal(initRes.registered.length, 7);
+  assert.equal(registeredSignals.length, 7);
+  assert.equal(initRes.controller.signal.aborted, false);
+  assert.equal(typeof pagehideHandler, 'function');
+  pagehideHandler();
+  assert.equal(initRes.controller.signal.aborted, true, 'pagehide aborts registration AbortSignal');
+
+  // 10. Silent fallback when document.modelContext is absent
+  const fallbackRes = await initWebMcp(snap, { baseRel: '.', doc: {}, win: {} });
+  assert.equal(fallbackRes.supported, false);
+  assert.equal(fallbackRes.registered.length, 0);
 });
 
 test('production server.mjs serves routes with Cache-Control >= 60s and healthz', async () => {

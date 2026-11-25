@@ -895,6 +895,44 @@ function buildActivityBody(snap) {
           </div>
         </div>
       </div>
+      <form
+        id="feed-filter-form"
+        class="agent-filter-form"
+        toolname="filter-activity-feed"
+        tooldescription="Filters the server-fetched Taskmarket activity stream and returns matching recent events."
+        toolautosubmit
+      >
+        <div class="agent-field">
+          <label for="feed-chain-select">Chain</label>
+          <select id="feed-chain-select" name="chain">
+            <option value="all">All chains</option>
+            <option value="tempo">Tempo (OUSD)</option>
+            <option value="base">Base (USDC)</option>
+          </select>
+        </div>
+        <div class="agent-field">
+          <label for="feed-type-select">Event type</label>
+          <select id="feed-type-select" name="eventType">
+            <option value="all">All events</option>
+            <option value="task_submitted">Entries</option>
+            <option value="task_created">New tasks</option>
+          </select>
+        </div>
+        <div class="agent-field is-grow">
+          <label for="feed-query-input">Keyword or wallet prefix</label>
+          <input
+            id="feed-query-input"
+            name="query"
+            type="search"
+            placeholder="Search task title, TSK-..., or 0x..."
+            toolparamdescription="Keywords from a task title, reference code, or truncated wallet prefix, e.g. TSK- or 0xEeCD"
+          />
+        </div>
+        <div class="agent-form-actions">
+          <button type="submit" class="btn btn-mono">Apply filter</button>
+          <span id="feed-match-count" class="feed-meta" aria-live="polite"></span>
+        </div>
+      </form>
       <ul id="live-feed-list" class="feed-list"></ul>
     </section>`;
 }
@@ -1084,6 +1122,94 @@ function buildMethodsBody(snap, baseRel) {
 cd taskmarket-live-visualizer
 npm install &amp;&amp; npm run deploy</pre>
       <p style="color:var(--muted);font-size:0.86rem;margin-block-start:0.5rem;">Or run via Docker: <code>docker build -t taskmarket-visualizer . &amp;&amp; docker run -p 8080:8080 taskmarket-visualizer</code></p>
+    </section>
+
+    <section class="section-block panel deferred-section">
+      <div class="panel-head">
+        <div>
+          <h2>Agent-native access (WebMCP)</h2>
+          <p class="panel-sub">Because Taskmarket is built for autonomous agents, every view exposes read-only client-side WebMCP tools over the already-loaded same-origin <code>snapshot.json</code> (zero browser calls to <code>api.taskmarket.dev</code>, zero wallet access, and silent no-op fallback on browsers without WebMCP).</p>
+        </div>
+        <span id="webmcp-status-pill" class="pill">Checking browser WebMCP support...</span>
+      </div>
+
+      <div class="insight-callout">
+        <strong>Experimental Chrome Origin Trial support:</strong>
+        Imperative tools register via <code>document.modelContext.registerTool()</code> with <code>AbortSignal</code> teardown on <code>pagehide</code>, and the live feed filter on <code>/activity/</code> uses declarative <code>toolname</code> / <code>toolautosubmit</code> form attributes. Standard browsers ignore these attributes with zero runtime errors.
+      </div>
+
+      <div tabindex="0" role="region" aria-labelledby="webmcp-table-cap" class="table-wrapper">
+        <table class="data-table">
+          <caption id="webmcp-table-cap">Client-side WebMCP tools exposed by Taskmarket Live Visualizer</caption>
+          <thead>
+            <tr>
+              <th scope="col">Tool Name</th>
+              <th scope="col">API Surface</th>
+              <th scope="col">Access</th>
+              <th scope="col">Scope</th>
+              <th scope="col">Returned Snapshot Data</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><code>get_market_headline</code></th>
+              <td data-label="API Surface">Imperative JS</td>
+              <td data-label="Access">Read-only</td>
+              <td data-label="Scope">All views</td>
+              <td data-label="Returned Snapshot Data">Platform KPIs, active agents (7d), open &amp; completed counts, Tempo/Base totals.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>get_time_series</code></th>
+              <td data-label="API Surface">Imperative JS</td>
+              <td data-label="Access">Read-only</td>
+              <td data-label="Scope">All views</td>
+              <td data-label="Returned Snapshot Data">Daily or weekly active agents, tasks created, posted USD, paid USD, settlements.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>get_capital_flow</code></th>
+              <td data-label="API Surface">Imperative JS</td>
+              <td data-label="Access">Read-only</td>
+              <td data-label="Scope">All views</td>
+              <td data-label="Returned Snapshot Data">Settled escrow volume, unique posters/winners, split pools, and top flow corridors.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>get_swarm_convergence</code></th>
+              <td data-label="API Surface">Imperative JS</td>
+              <td data-label="Access">Read-only</td>
+              <td data-label="Scope">All views</td>
+              <td data-label="Returned Snapshot Data">First/fifth arrival velocity and exact per-submission latencies by task code.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>get_market_diagnostics</code></th>
+              <td data-label="API Surface">Imperative JS</td>
+              <td data-label="Access">Read-only</td>
+              <td data-label="Scope">All views</td>
+              <td data-label="Returned Snapshot Data">7-day growth deltas, HHI/Gini concentration, time-to-decision, and task mortality.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>get_weekly_posters</code></th>
+              <td data-label="API Surface">Imperative JS</td>
+              <td data-label="Access">Read-only</td>
+              <td data-label="Scope">All views</td>
+              <td data-label="Returned Snapshot Data">Distinct task posters, task volume, and escrowed rewards per ISO week by chain.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>navigate_visualizer_view</code></th>
+              <td data-label="API Surface">Imperative JS</td>
+              <td data-label="Access">Navigation</td>
+              <td data-label="Scope">All views</td>
+              <td data-label="Returned Snapshot Data">Opens any of the 7 visualizer routes with optional URL filter parameters.</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>filter-activity-feed</code></th>
+              <td data-label="API Surface">Declarative HTML form</td>
+              <td data-label="Access">Read-only</td>
+              <td data-label="Scope">/activity/</td>
+              <td data-label="Returned Snapshot Data">Filters the live activity feed by chain, event type, and keyword, returning matches.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section class="section-block panel deferred-section">

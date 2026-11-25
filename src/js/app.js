@@ -15,10 +15,20 @@ import {
   getParam,
   initNavbar,
   initShareBar,
+  initViewTransitions,
   loadSnapshot,
   setParams,
+  showToast,
   wireTablist,
 } from './core.js';
+
+import {
+  CHAINS,
+  FEED_EVENT_TYPES,
+  filterActivityItems,
+  initWebMcp,
+  updateWebMcpStatusBadge,
+} from './webmcp.js';
 
 import {
   renderBreakdownBars,
@@ -372,23 +382,101 @@ function hydrateActivity(snap) {
   drawHeatmaps();
 
   let feedChain = getParam('chain', 'all');
+  if (!CHAINS.includes(feedChain)) feedChain = 'all';
   let feedType = getParam('type', 'all');
+  if (!FEED_EVENT_TYPES.includes(feedType)) feedType = 'all';
+  let feedQuery = getParam('q', '');
+
   const feedEl = document.getElementById('live-feed-list');
-  const drawFeed = () => {
-    renderLiveFeed({ items: snap.activityFeed.recent, container: feedEl, chainFilter: feedChain, typeFilter: feedType });
+  const feedForm = document.getElementById('feed-filter-form');
+  const chainSelect = feedForm?.elements?.namedItem('chain');
+  const typeSelect = feedForm?.elements?.namedItem('eventType');
+  const queryInput = feedForm?.elements?.namedItem('query');
+  const matchCountEl = document.getElementById('feed-match-count');
+
+  const syncFormControls = () => {
+    if (chainSelect) chainSelect.value = feedChain;
+    if (typeSelect) typeSelect.value = feedType;
+    if (queryInput) queryInput.value = feedQuery;
   };
+
+  const drawFeed = () => {
+    const matched = renderLiveFeed({
+      items: snap.activityFeed.recent,
+      container: feedEl,
+      chainFilter: feedChain,
+      typeFilter: feedType,
+      queryFilter: feedQuery,
+    });
+    if (matchCountEl) {
+      matchCountEl.textContent = `${fmtInt(matched.length)} matching events`;
+    }
+    return matched;
+  };
+
   const chainCtrl = wireTablist(document.getElementById('feed-chain-tabs'), (val) => {
     feedChain = val;
-    setParams({ chain: val });
+    setParams({ chain: val, type: feedType, q: feedQuery || null });
+    syncFormControls();
     drawFeed();
   });
   const typeCtrl = wireTablist(document.getElementById('feed-type-tabs'), (val) => {
     feedType = val;
-    setParams({ type: val });
+    setParams({ chain: feedChain, type: val, q: feedQuery || null });
+    syncFormControls();
     drawFeed();
   });
+
+  if (feedForm) {
+    feedForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const formData = new FormData(feedForm);
+      const nextChain = String(formData.get('chain') || 'all').toLowerCase();
+      const nextType = String(formData.get('eventType') || 'all');
+      const nextQuery = String(formData.get('query') || '').trim();
+
+      const errors = [];
+      if (!CHAINS.includes(nextChain)) errors.push(`chain (expected one of ${CHAINS.join(', ')})`);
+      if (!FEED_EVENT_TYPES.includes(nextType)) errors.push(`eventType (expected one of ${FEED_EVENT_TYPES.join(', ')})`);
+
+      if (errors.length > 0) {
+        if (event.agentInvoked && typeof event.respondWith === 'function') {
+          event.respondWith(Promise.resolve(`Validation failed: ${errors.join(', ')}`));
+        }
+        return;
+      }
+
+      feedChain = nextChain;
+      feedType = nextType;
+      feedQuery = nextQuery;
+      setParams({ chain: feedChain, type: feedType, q: feedQuery || null });
+      chainCtrl?.setValue(feedChain);
+      typeCtrl?.setValue(feedType);
+      syncFormControls();
+      drawFeed();
+
+      if (event.agentInvoked && typeof event.respondWith === 'function') {
+        const result = filterActivityItems(snap.activityFeed.recent, {
+          chain: feedChain,
+          eventType: feedType,
+          query: feedQuery,
+          limit: 25,
+        });
+        event.respondWith(
+          Promise.resolve({
+            asOfUtc: fmtUtc(snap.meta.fetchedAt),
+            filters: { chain: feedChain, eventType: feedType, query: feedQuery },
+            totalMatched: result.totalMatched,
+            items: result.items,
+          })
+        );
+      }
+    });
+  }
+
   chainCtrl?.setValue(feedChain);
   typeCtrl?.setValue(feedType);
+  syncFormControls();
   drawFeed();
 }
 
@@ -439,11 +527,30 @@ function hydrateChains(snap) {
 }
 
 async function boot() {
+  initViewTransitions();
   initNavbar();
   initShareBar();
 
   const page = document.body.dataset.page || 'overview';
-  if (page === 'methods') return; // Methods page is 100% pre-rendered static HTML
+  const baseRel = document.documentElement.dataset.base || '.';
+  const onToolEvent = (type, toolName) => {
+    if (type === 'toolactivated') showToast(`Agent invoked WebMCP tool: ${toolName}`);
+    else if (type === 'toolcancel') showToast(`WebMCP tool cancelled: ${toolName}`);
+  };
+
+  if (page === 'methods') {
+    if ('modelContext' in document && typeof document.modelContext?.registerTool === 'function') {
+      try {
+        const snap = await loadSnapshot();
+        await initWebMcp(snap, { baseRel, onToolEvent });
+      } catch (err) {
+        console.warn('WebMCP snapshot load skipped on methods page:', err);
+      }
+    } else {
+      updateWebMcpStatusBadge(false, 0);
+    }
+    return;
+  }
 
   try {
     const snap = await loadSnapshot();
@@ -458,6 +565,8 @@ async function boot() {
     else if (page === 'insights') hydrateInsights(snap);
     else if (page === 'activity') hydrateActivity(snap);
     else if (page === 'chains') hydrateChains(snap);
+
+    await initWebMcp(snap, { baseRel, onToolEvent });
   } catch (err) {
     console.error('Failed to hydrate live snapshot:', err);
   }

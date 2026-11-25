@@ -22,6 +22,9 @@ Every route is a standalone static HTML page with its own server-generated `1200
 - **Automatic Refresh:**
   - **GitHub Pages (hosted):** `.github/workflows/deploy-pages.yml` runs on schedule every 30 minutes (`17,47 * * * *` UTC), fetches fresh live data, regenerates all 7 HTML views and 7 live OG PNG cards, runs `npm test`, and publishes to GitHub Pages CDN (`Cache-Control: max-age=600`).
   - **Self-hosted Node.js (`server.mjs`):** Automatically refreshes every 30 minutes (`REFRESH_INTERVAL_MINUTES=30`) in the background and serves responses with `Cache-Control: public, max-age=60, stale-while-revalidate=300` and gzip compression.
+- **Agent-Native WebMCP Access & Modern Web Progressive Enhancement:**
+  - Exposes 7 read-only/navigation imperative WebMCP tools (`document.modelContext.registerTool` with `AbortSignal` cleanup on `pagehide`) plus 1 declarative WebMCP filter form (`toolname="filter-activity-feed" toolautosubmit` on `/activity/`), all querying strictly the in-memory same-origin `snapshot.json` with silent no-op fallback on browsers without WebMCP.
+  - Progressive-enhancement Cross-Document View Transitions (`@view-transition { navigation: auto; }` gated by `prefers-reduced-motion: no-preference`), below-the-fold `content-visibility: auto` + `contain-intrinsic-size`, native Popover responsive navigation, and container-query responsive tables.
 - **Privacy & Rules Compliance:** Read-only, zero wallet connections, zero login, zero cookies, zero analytics or third-party trackers, self-hosted SIL OFL Taskmarket Brand Kit fonts (`Instrument Serif`, `Inter Tight`, `Departure Mono`), official unmodified Taskmarket lockup, and strictly truncated hex wallet addresses with zero guessed identities.
 
 ## Endpoints Queried (`https://api.taskmarket.dev`)

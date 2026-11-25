@@ -1107,17 +1107,22 @@ export function renderMortalityMatrix({ mortality, container, mode = 'tasks' }) 
 /* ==========================================================================
    9. Filterable Live Activity Feed
    ========================================================================== */
-export function renderLiveFeed({ items, container, chainFilter = 'all', typeFilter = 'all' }) {
-  if (!container) return;
+export function renderLiveFeed({ items, container, chainFilter = 'all', typeFilter = 'all', queryFilter = '' }) {
+  if (!container) return [];
+  const q = String(queryFilter || '').trim().toLowerCase();
   const filtered = (items || []).filter((item) => {
     if (chainFilter !== 'all' && item.chain.toLowerCase() !== chainFilter) return false;
     if (typeFilter !== 'all' && item.type !== typeFilter) return false;
+    if (q) {
+      const hay = `${item.taskTitle || ''} ${item.actorShort || ''} ${item.chain || ''} ${item.symbol || ''} ${item.type || ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     return true;
   });
 
   if (!filtered.length) {
     container.innerHTML = `<li class="feed-row"><span class="feed-meta">No events match the active filter in the latest window.</span></li>`;
-    return;
+    return [];
   }
 
   container.innerHTML = filtered
@@ -1140,4 +1145,6 @@ export function renderLiveFeed({ items, container, chainFilter = 'all', typeFilt
         </li>`;
     })
     .join('');
+
+  return filtered;
 }
